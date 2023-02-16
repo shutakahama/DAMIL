@@ -1,0 +1,5 @@
+.nouse
+__pycache__
+experiment.sh
+MNIST
+SVHN
