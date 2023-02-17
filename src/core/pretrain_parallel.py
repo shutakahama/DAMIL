@@ -22,7 +22,6 @@ class PretrainParallel:
         self.args = args
 
         if "get_params" in [obj[0] for obj in inspect.getmembers(self.encoder, inspect.ismethod)]:
-            print("fixed model")
             self.optimizer_e = optim.Adam(
                 self.encoder.get_params(), lr=args.lr_pe, weight_decay=args.wd)
         else:
@@ -41,7 +40,9 @@ class PretrainParallel:
             self.optimizer_a, step_size=args.lr_interval, gamma=args.lr_dim)
 
         self.len_data_loader = min(
-            len(self.data_loaders["source_train"].dataset), len(self.data_loaders["target_train"].dataset))
+            len(self.data_loaders["source_train"].dataset),
+            len(self.data_loaders["target_train"].dataset)
+        )
 
     def reset_grad(self):
         self.optimizer_e.zero_grad()
@@ -99,7 +100,7 @@ class PretrainParallel:
 
                 loss_s = criterion(output_s, source_instance_label)
                 loss_t = criterion(pred_tgt, target_bag_label)
-                loss = self.args.wda * loss_s + self.args.wmil * loss_t
+                loss = loss_s + loss_t
                 loss.backward()
                 self.optimizer_a.step()
                 self.optimizer_e.step()
@@ -113,9 +114,12 @@ class PretrainParallel:
                 _output_att = torch.unsqueeze(_output_att.reshape(-1), dim=0)
                 output_att = torch.cat((1 - _output_att, _output_att), dim=0).T
 
-                pred_cls_list = np.append(pred_cls_list, np.array(output_cls.data.cpu()), axis=0)
-                pred_bag_list = np.append(pred_bag_list, np.array(output_bag.data.cpu()), axis=0)
-                pred_ins_list = np.append(pred_ins_list, np.array(output_att.data.cpu()), axis=0)
+                # pred_cls_list = np.append(pred_cls_list, np.array(output_cls.data.cpu()), axis=0)
+                # pred_bag_list = np.append(pred_bag_list, np.array(output_bag.data.cpu()), axis=0)
+                # pred_ins_list = np.append(pred_ins_list, np.array(output_att.data.cpu()), axis=0)
+                pred_cls_list = np.append(pred_cls_list, np.array(F.softmax(output_cls.data.cpu(), dim=1)), axis=0)
+                pred_bag_list = np.append(pred_bag_list, np.array(F.softmax(output_bag.data.cpu(), dim=1)), axis=0)
+                pred_ins_list = np.append(pred_ins_list, np.array(F.softmax(output_att.data.cpu(), dim=1)), axis=0)
                 gt_cls_list = np.append(gt_cls_list, np.array(source_instance_label.data.cpu()), axis=0)
                 gt_bag_list = np.append(gt_bag_list, np.max(target_instance_label.data.cpu().numpy(), keepdims=True), axis=0)
                 gt_ins_list = np.append(gt_ins_list, np.array(target_instance_label.data.cpu()), axis=0)
@@ -124,9 +128,9 @@ class PretrainParallel:
 
             self.plotter.record(epoch, 'pre_train_source_loss', train_loss_s/self.len_data_loader)
             self.plotter.record(epoch, 'pre_train_target_loss', train_loss_t/self.len_data_loader)
-            evaluate(self.plotter, epoch, 'pre_train_source_classifier', pred_cls_list, gt_cls_list, self.args.mode)
-            evaluate(self.plotter, epoch, 'pre_train_target_bag', pred_bag_list, gt_bag_list, self.args.mode)
-            evaluate(self.plotter, epoch, 'pre_train_target_instance', pred_ins_list, gt_ins_list, self.args.mode)
+            evaluate(self.plotter, epoch, 'pre_train_source_classifier', pred_cls_list, gt_cls_list)
+            evaluate(self.plotter, epoch, 'pre_train_target_bag', pred_bag_list, gt_bag_list)
+            evaluate(self.plotter, epoch, 'pre_train_target_instance', pred_ins_list, gt_ins_list)
 
             self.scheduler_step()
             self.plotter.flush(epoch)
@@ -149,7 +153,6 @@ class PretrainParallel:
         feature_list = np.empty((0, self.args.feat_dim), np.float32)
         start_time = time.time()
 
-        # evaluate network
         with torch.no_grad():
             for step, batch in enumerate(test_data_loader):
                 data, label = batch
@@ -181,12 +184,12 @@ class PretrainParallel:
                 progress_report('test', step, start_time, self.args.batch_size, len_data)
 
         self.plotter.record(epoch, f'pre_test_{data_category}_classifier_loss', loss_cls / len_data)
-        evaluate(self.plotter, epoch, f'pre_test_{data_category}_classifier', pred_cls_list, gt_cls_list, self.args.mode)
+        evaluate(self.plotter, epoch, f'pre_test_{data_category}_classifier', pred_cls_list, gt_cls_list)
         if data_category == "target":
             self.plotter.record(epoch, f'pre_test_{data_category}_bag_loss', loss_bag / len_data)
             self.plotter.record(epoch, f'pre_test_{data_category}_instance_loss', loss_ins / len_data)
-            evaluate(self.plotter, epoch, f'pre_test_{data_category}_bag', pred_bag_list, gt_bag_list, self.args.mode)
-            evaluate(self.plotter, epoch, f'pre_test_{data_category}_instance', pred_ins_list, gt_cls_list, self.args.mode)
+            evaluate(self.plotter, epoch, f'pre_test_{data_category}_bag', pred_bag_list, gt_bag_list)
+            evaluate(self.plotter, epoch, f'pre_test_{data_category}_instance', pred_ins_list, gt_cls_list)
 
         self.plotter.save_files({
             f"pre_feature_{data_category}.npy": feature_list,

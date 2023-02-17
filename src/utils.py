@@ -36,13 +36,13 @@ def init_model(net, device, restore):
     return net.to(device)
 
 
-def evaluate(plotter, epoch, data_name, pred_list, gt_list, args_mode):
+def evaluate(plotter, epoch, data_name, pred_list, gt_list):
     acc = np.mean(np.array(gt_list) == np.argmax(pred_list, axis=1))
     roc_auc = roc_auc_score(gt_list, pred_list[:, 1])
     pr_auc = average_precision_score(gt_list, pred_list[:, 1])
     plotter.record(epoch, f'{data_name}_accuracy', acc)
     plotter.record(epoch, f'{data_name}_pr_auc', pr_auc)
-    if "target" in data_name and (("bag" in data_name) or (args_mode != "mil" and "classifier" in data_name) or ("instance" in data_name)):
+    if "target" in data_name:
         plotter.record(epoch, f'{data_name}_roc_auc', roc_auc)
 
     return pr_auc
