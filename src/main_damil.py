@@ -2,7 +2,7 @@ import os
 import torch
 import argparse
 
-from dataset_digit import DigitDataLoader
+from dataset_digit import DigitDataFactory
 from dataset_visda import VisdaDataLoader
 from core import AdaptPMCDDA, PretrainParallel
 from models import EncoderVisda, EncoderDigit, Classifier, Attention
@@ -61,35 +61,24 @@ def main():
         args.device = torch.device('cpu')
 
     print(f"=== Loading datasets {args.dataset_name} ===")
-    dataloader_class = {
+    data_factory_class = {
         "visda": VisdaDataLoader,
-        "digit": DigitDataLoader,
+        "digit": DigitDataFactory,
     }[args.dataset_name]
-    dataloader = dataloader_class(
+    data_factory = data_factory_class(
         args.positive_class, args.negative_class, args.batch_size,
-        args.mean, args.var, args.num_class, args.seed)
-
-    source_data, source_label = dataloader.get_data_bags(
-        args.source_dataset, args.train_length)
-    source_data_test, source_label_test = dataloader.get_data_bags(
-        args.source_dataset, args.test_length, train=False)
-    target_data, target_label = dataloader.get_data_bags(
-        args.target_dataset, args.train_length)
-    target_data_test, target_label_test = dataloader.get_data_bags(
-        args.target_dataset, args.test_length, train=False)
-
-    pretrain_data_loaders = {
-        "source_train": dataloader.data_to_dataloader(
-            source_data, source_label),
-        "source_test": dataloader.data_to_dataloader(
-            source_data_test, source_label_test, train=False),
-        "target_train": dataloader.data_to_dataloader(
-            target_data, target_label),
-        "target_test": dataloader.data_to_dataloader(
-            target_data_test, target_label_test, train=False),
+        args.mean, args.var, args.seed)
+    data_loaders = {
+        "source_train": data_factory.get_data_loader(
+            args.source_dataset, args.train_length),
+        "source_test": data_factory.get_data_loader(
+            args.source_dataset, args.test_length, train=False),
+        "target_train": data_factory.get_data_loader(
+            args.target_dataset, args.train_length),
+        "target_test": data_factory.get_data_loader(
+            args.target_dataset, args.test_length, train=False),
     }
 
-    # load models
     print("=== Loading models ===")
     encoder_model = {
         "visda": EncoderVisda,
@@ -111,17 +100,16 @@ def main():
         net=Attention(args.feat_dim, args.num_class), device=args.device,
         restore=os.path.join(args.restore_path, 'pre_attention.model'))
 
-    # Pretrain model
     use_pretrained = (encoder.restored and classifier_pre.restored and attention.restored)
     if not use_pretrained:
         print("=== Pre-training classifier ===")
         pretrain = PretrainParallel(
-            out_dir, encoder, classifier_pre, attention, pretrain_data_loaders, args)
+            out_dir, encoder, classifier_pre, attention, data_loaders, args)
         pretrain.train()
         pretrain.plotter.refresh()
 
-        pretrain.test('test', pretrain_data_loaders["source_test"], data_category='source')
-        pretrain.test('test', pretrain_data_loaders["target_test"], data_category='target')
+        pretrain.test('test', data_loaders["source_test"], data_category='source')
+        pretrain.test('test', data_loaders["target_test"], data_category='target')
         pretrain.plotter.flush('test')
 
         encoder = pretrain.encoder
@@ -129,27 +117,15 @@ def main():
         classifier1 = pretrain.classifier  # not initialize classifier ???
         classifier2 = pretrain.classifier
 
-    adapt_data_loaders = {
-        "source_train": dataloader.data_to_dataloader(
-            source_data, source_label, dataloader_type="index"),
-        "source_test": dataloader.data_to_dataloader(
-            source_data_test, source_label_test, train=False),
-        "target_train": dataloader.data_to_dataloader(
-            target_data, target_label, dataloader_type="index"),
-        "target_test": dataloader.data_to_dataloader(
-            target_data_test, target_label_test, train=False),
-    }
-
-    # domain adaptation
     print("=== Training with Domain Adaptaion ===")
     adapt = AdaptPMCDDA(
-        out_dir, encoder, classifier1, classifier2, attention, adapt_data_loaders, args)
+        out_dir, encoder, classifier1, classifier2, attention, data_loaders, args)
 
     adapt.train()
     adapt.plotter.refresh()
 
-    adapt.test('test', adapt_data_loaders["source_test"], data_category='source')
-    adapt.test('test', adapt_data_loaders["target_test"], data_category='target')
+    adapt.test('test', data_loaders["source_test"], data_category='source')
+    adapt.test('test', data_loaders["target_test"], data_category='target')
     adapt.plotter.flush('test')
 
 

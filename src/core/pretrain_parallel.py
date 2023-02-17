@@ -75,8 +75,8 @@ class PretrainParallel:
             data_zip = enumerate(zip(self.data_loaders["source_train"], self.data_loaders["target_train"]))
 
             for step, (source_batch, target_batch) in data_zip:
-                source_data, source_label = source_batch
-                target_data, target_label = target_batch
+                source_data, source_label, _ = source_batch
+                target_data, target_label, _ = target_batch
 
                 source_data = source_data.squeeze(0)
                 target_data = target_data.squeeze(0)
@@ -114,9 +114,6 @@ class PretrainParallel:
                 _output_att = torch.unsqueeze(_output_att.reshape(-1), dim=0)
                 output_att = torch.cat((1 - _output_att, _output_att), dim=0).T
 
-                # pred_cls_list = np.append(pred_cls_list, np.array(output_cls.data.cpu()), axis=0)
-                # pred_bag_list = np.append(pred_bag_list, np.array(output_bag.data.cpu()), axis=0)
-                # pred_ins_list = np.append(pred_ins_list, np.array(output_att.data.cpu()), axis=0)
                 pred_cls_list = np.append(pred_cls_list, np.array(F.softmax(output_cls.data.cpu(), dim=1)), axis=0)
                 pred_bag_list = np.append(pred_bag_list, np.array(F.softmax(output_bag.data.cpu(), dim=1)), axis=0)
                 pred_ins_list = np.append(pred_ins_list, np.array(F.softmax(output_att.data.cpu(), dim=1)), axis=0)
@@ -126,13 +123,16 @@ class PretrainParallel:
 
                 progress_report(epoch, step, start_time, self.args.batch_size, self.len_data_loader)
 
+            self.scheduler_step()
+
             self.plotter.record(epoch, 'pre_train_source_loss', train_loss_s/self.len_data_loader)
             self.plotter.record(epoch, 'pre_train_target_loss', train_loss_t/self.len_data_loader)
             evaluate(self.plotter, epoch, 'pre_train_source_classifier', pred_cls_list, gt_cls_list)
             evaluate(self.plotter, epoch, 'pre_train_target_bag', pred_bag_list, gt_bag_list)
             evaluate(self.plotter, epoch, 'pre_train_target_instance', pred_ins_list, gt_ins_list)
 
-            self.scheduler_step()
+            self.test(epoch, self.data_loaders["source_test"], data_category='source')
+            self.test(epoch, self.data_loaders["target_test"], data_category='target')
             self.plotter.flush(epoch)
 
     def test(self, epoch, test_data_loader, data_category='source'):
@@ -155,7 +155,7 @@ class PretrainParallel:
 
         with torch.no_grad():
             for step, batch in enumerate(test_data_loader):
-                data, label = batch
+                data, label, _ = batch
                 bag_label = label[0].long()
                 instance_label = label[1].reshape(-1).long()
 

@@ -196,7 +196,6 @@ class AdaptPMCDDA(object):
             output_t1 = self.classifier1(feat_tgt)
             output_t2 = self.classifier2(feat_tgt)
             output_t = (output_t1 + output_t2)
-            # pred_cls_list = np.append(pred_cls_list, np.array(output_t.data.cpu()), axis=0)
             pred_cls_list = np.append(pred_cls_list, np.array(F.softmax(output_t.data.cpu(), dim=1)), axis=0)
             gt_cls_list = np.append(gt_cls_list, np.array(target_instance_label.data.cpu()), axis=0)
 
@@ -250,7 +249,7 @@ class AdaptPMCDDA(object):
 
         with torch.no_grad():
             for step, batch in enumerate(test_data_loader):
-                data, label = batch
+                data, label, _ = batch
 
                 bag_label = label[0].long()
                 instance_label = label[1].reshape(-1).long()
@@ -271,8 +270,6 @@ class AdaptPMCDDA(object):
                 loss_cls += criterion(pred_cls, instance_label).data
                 loss_bag += criterion(pred_bag, bag_label).data
                 loss_ins += criterion(pred_att, instance_label).data
-                # pred_cls_list = np.append(pred_cls_list, np.array(pred_cls.data.cpu()), axis=0)
-                # pred_bag_list = np.append(pred_bag_list, np.array(pred_bag.data.cpu()), axis=0)
                 pred_cls_list = np.append(pred_cls_list, np.array(F.softmax(pred_cls.data.cpu(), dim=1)), axis=0)
                 pred_bag_list = np.append(pred_bag_list, np.array(F.softmax(pred_bag.data.cpu(), dim=1)), axis=0)
                 pred_ins_list = np.append(pred_ins_list, np.array(pred_att.data.cpu()), axis=0)

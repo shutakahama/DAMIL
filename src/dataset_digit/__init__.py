@@ -1,5 +1,5 @@
-from .data_loader import DigitDataLoader
+from .data_loader import DigitDataFactory
 
 __all__ = [
-    'DigitDataLoader',
+    'DigitDataFactory',
 ]
