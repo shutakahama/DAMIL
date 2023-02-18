@@ -111,7 +111,7 @@ def main():
 
         encoder = pretrain.encoder
         attention = pretrain.attention
-        classifier1 = pretrain.classifier  # not initialize classifier ???
+        classifier1 = pretrain.classifier
         classifier2 = pretrain.classifier
 
     logger.info("=== Adaptation Training ===")
