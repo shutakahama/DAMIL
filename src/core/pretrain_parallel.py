@@ -23,14 +23,14 @@ class PretrainParallel:
 
         if "get_params" in [obj[0] for obj in inspect.getmembers(self.encoder, inspect.ismethod)]:
             self.optimizer_e = optim.Adam(
-                self.encoder.get_params(), lr=args.lr_pe, weight_decay=args.wd)
+                self.encoder.get_params(), lr=args.lr_pretrain, weight_decay=args.weight_decay)
         else:
             self.optimizer_e = optim.Adam(
-                self.encoder.parameters(), lr=args.lr_pe, weight_decay=args.wd)
+                self.encoder.parameters(), lr=args.lr_pretrain, weight_decay=args.weight_decay)
         self.optimizer_c = optim.Adam(
-            self.classifier.parameters(), lr=args.lr_pc, weight_decay=args.wd)
+            self.classifier.parameters(), lr=args.lr_pretrain, weight_decay=args.weight_decay)
         self.optimizer_a = optim.Adam(
-            self.attention.parameters(), lr=args.lr_pa, weight_decay=args.wd)
+            self.attention.parameters(), lr=args.lr_pretrain, weight_decay=args.weight_decay)
 
         self.scheduler_e = StepLR(
             self.optimizer_e, step_size=args.lr_interval, gamma=args.lr_dim)
@@ -125,25 +125,25 @@ class PretrainParallel:
 
             self.scheduler_step()
 
-            self.plotter.record(epoch, 'pre_train_source_loss', train_loss_s/self.len_data_loader)
-            self.plotter.record(epoch, 'pre_train_target_loss', train_loss_t/self.len_data_loader)
-            evaluate(self.plotter, epoch, 'pre_train_source_classifier', pred_cls_list, gt_cls_list)
-            evaluate(self.plotter, epoch, 'pre_train_target_bag', pred_bag_list, gt_bag_list)
-            evaluate(self.plotter, epoch, 'pre_train_target_instance', pred_ins_list, gt_ins_list)
+            self.plotter.record(epoch, 'train_source_loss', train_loss_s/self.len_data_loader)
+            self.plotter.record(epoch, 'train_target_loss', train_loss_t/self.len_data_loader)
+            evaluate(self.plotter, epoch, 'train_source_classifier', pred_cls_list, gt_cls_list)
+            evaluate(self.plotter, epoch, 'train_target_bag', pred_bag_list, gt_bag_list)
+            evaluate(self.plotter, epoch, 'train_target_instance', pred_ins_list, gt_ins_list)
 
-            self.test(epoch, self.data_loaders["source_test"], data_category='source')
-            self.test(epoch, self.data_loaders["target_test"], data_category='target')
+            self.predict(epoch, self.data_loaders["source_valid"], split_type='valid', data_category='source')
+            self.predict(epoch, self.data_loaders["target_valid"], split_type='valid', data_category='target')
             self.plotter.flush(epoch)
 
-    def test(self, epoch, test_data_loader, data_category='source'):
-        print("test")
+    def predict(self, epoch, data_loader, split_type='test', data_category='source'):
+        print(f"{split_type} {data_category}")
         self.encoder.eval()
         self.classifier.eval()
         self.attention.eval()
         criterion = nn.CrossEntropyLoss().to(self.args.device)
 
         # init loss and accuracy
-        len_data = len(test_data_loader.dataset)
+        len_data = len(data_loader.dataset)
         loss_cls = loss_bag = loss_ins = 0
         pred_cls_list = np.empty((0, self.args.num_class), np.float32)
         pred_bag_list = np.empty((0, self.args.num_class), np.float32)
@@ -154,7 +154,7 @@ class PretrainParallel:
         start_time = time.time()
 
         with torch.no_grad():
-            for step, batch in enumerate(test_data_loader):
+            for step, batch in enumerate(data_loader):
                 data, label, _ = batch
                 bag_label = label[0].long()
                 instance_label = label[1].reshape(-1).long()
@@ -181,22 +181,23 @@ class PretrainParallel:
                     pred_ins_list = np.append(pred_ins_list, np.array(F.softmax(pred_att.data.cpu(), dim=1)), axis=0)
                     gt_bag_list = np.append(gt_bag_list, np.max(instance_label.data.cpu().numpy(), keepdims=True), axis=0)
 
-                progress_report('test', step, start_time, self.args.batch_size, len_data)
+                progress_report(split_type, step, start_time, self.args.batch_size, len_data)
 
-        self.plotter.record(epoch, f'pre_test_{data_category}_classifier_loss', loss_cls / len_data)
-        evaluate(self.plotter, epoch, f'pre_test_{data_category}_classifier', pred_cls_list, gt_cls_list)
+        self.plotter.record(epoch, f'{split_type}_{data_category}_classifier_loss', loss_cls / len_data)
+        score = evaluate(self.plotter, epoch, f'{split_type}_{data_category}_classifier', pred_cls_list, gt_cls_list)
         if data_category == "target":
-            self.plotter.record(epoch, f'pre_test_{data_category}_bag_loss', loss_bag / len_data)
-            self.plotter.record(epoch, f'pre_test_{data_category}_instance_loss', loss_ins / len_data)
-            evaluate(self.plotter, epoch, f'pre_test_{data_category}_bag', pred_bag_list, gt_bag_list)
-            evaluate(self.plotter, epoch, f'pre_test_{data_category}_instance', pred_ins_list, gt_cls_list)
+            self.plotter.record(epoch, f'{split_type}_{data_category}_bag_loss', loss_bag / len_data)
+            self.plotter.record(epoch, f'{split_type}_{data_category}_instance_loss', loss_ins / len_data)
+            evaluate(self.plotter, epoch, f'{split_type}_{data_category}_bag', pred_bag_list, gt_bag_list)
+            evaluate(self.plotter, epoch, f'{split_type}_{data_category}_instance', pred_ins_list, gt_cls_list)
 
-        self.plotter.save_files({
-            f"pre_feature_{data_category}.npy": feature_list,
-            f"pre_label_{data_category}.npy": gt_cls_list
-        })
-        self.plotter.save_models({
-            "pre_encoder.model": self.encoder,
-            "pre_classifier.model": self.classifier,
-            "pre_attention.model": self.attention
-        })
+        if data_category == "target" and split_type == 'valid':
+            self.plotter.save_files({
+                f"feature_{data_category}.npy": feature_list,
+                f"label_{data_category}.npy": gt_cls_list
+            }, score)
+            self.plotter.save_models({
+                "encoder.model": self.encoder,
+                "classifier.model": self.classifier,
+                "attention.model": self.attention
+            }, score)

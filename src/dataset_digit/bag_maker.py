@@ -5,11 +5,11 @@ from torchvision.datasets import MNIST, SVHN
 
 
 class BagMaker(data_utils.Dataset):
-    def __init__(self, positive_number, negative_number, mean_bag_length, var_bag_length, seed):
+    def __init__(self, positive_number, negative_number, bag_size_mean, bag_size_var, seed):
         self.positive_number = positive_number
         self.negative_number = negative_number
-        self.mean_bag_length = mean_bag_length
-        self.var_bag_length = var_bag_length
+        self.bag_size_mean = bag_size_mean
+        self.bag_size_var = bag_size_var
         self.r = np.random.RandomState(seed)
 
     @staticmethod
@@ -56,9 +56,10 @@ class BagMaker(data_utils.Dataset):
             data_neg = data[labels == self.negative_number]
         else:
             data_neg = data[labels != self.positive_number]
-        print(f"{dataset_name}_{'train' if train else 'test'}"
-              f"-> all data: {len(data)}, positive: {len(data_pos)}, negative: {len(data_neg)}")
         data_pos, data_neg = self.r.permutation(data_pos), self.r.permutation(data_neg)
+        print(
+            f"{dataset_name}_{'train' if train else 'test'}"
+            f"-> all data: {len(data)}, positive: {len(data_pos)}, negative: {len(data_neg)}")
 
         pos_bag_num = nums_bag // 2
         neg_bag_num = nums_bag - pos_bag_num
@@ -66,7 +67,7 @@ class BagMaker(data_utils.Dataset):
         bag_list, label_list = [], []
 
         for _ in range(neg_bag_num):
-            bag_length = max(int(self.r.normal(self.mean_bag_length, self.var_bag_length, 1)), 1)
+            bag_length = max(int(self.r.normal(self.bag_size_mean, self.bag_size_var, 1)), 1)
 
             current_bag = data_neg[neg_idx:neg_idx + bag_length]
             neg_idx += bag_length
@@ -74,9 +75,9 @@ class BagMaker(data_utils.Dataset):
             label_list.append(torch.tensor([0] * bag_length))
 
         for _ in range(pos_bag_num):
-            bag_length = max(int(self.r.normal(self.mean_bag_length, self.var_bag_length, 1)), 1)
+            bag_length = max(int(self.r.normal(self.bag_size_mean, self.bag_size_var, 1)), 1)
 
-            pos_mean, pos_var = self.mean_bag_length / 10, self.mean_bag_length / 10
+            pos_mean, pos_var = self.bag_size_mean / 10, self.bag_size_var / 10
             pos_length = min(max(int(self.r.normal(pos_mean, pos_var, 1)), 1), bag_length)
             neg_length = bag_length - pos_length
 

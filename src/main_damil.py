@@ -3,9 +3,8 @@ import torch
 import argparse
 
 from dataset_digit import DigitDataFactory
-from dataset_visda import VisdaDataLoader
 from core import AdaptPMCDDA, PretrainParallel
-from models import EncoderVisda, EncoderDigit, Classifier, Attention
+from models import EncoderDigit, Classifier, Attention
 from utils import init_model, create_output_dir
 
 
@@ -18,27 +17,24 @@ def parse_args():
     parser.add_argument("--gpu", "-g", type=int, default=-1)
     parser.add_argument("--batch_size", "-b", type=int, default=1)
     parser.add_argument("--num_epochs_pre", type=int, default=50)
-    parser.add_argument("--num_epochs", type=int, default=100)
+    parser.add_argument("--num_epochs_adapt", type=int, default=100)
     # Dataset settings
-    parser.add_argument("--dataset_name", type=str, default='visda')
-    parser.add_argument("--source_dataset", type=str, default='train')
-    parser.add_argument("--target_dataset", type=str, default='validation')
-    parser.add_argument("--train_length", type=int, default=500)
-    parser.add_argument("--test_length", type=int, default=200)
-    parser.add_argument("--mean", type=float, default=10)
-    parser.add_argument("--var", type=float, default=2)
-    parser.add_argument("--positive_class", type=int, default=-1)
+    parser.add_argument("--dataset_name", type=str, default='digit')
+    parser.add_argument("--source_dataset", type=str, default='mnist')
+    parser.add_argument("--target_dataset", type=str, default='svhn')
+    parser.add_argument("--positive_class", type=int, default=9)
     parser.add_argument("--negative_class", type=int, default=-1)
+    parser.add_argument("--train_length", type=int, default=2000)
+    parser.add_argument("--test_length", type=int, default=500)
+    parser.add_argument("--bag_size_mean", type=float, default=10)
+    parser.add_argument("--bag_size_var", type=float, default=2)
+    parser.add_argument("--valid_rate", type=int, default=0.2)
     # Training settings
-    parser.add_argument("--lr_pe", type=float, default=1.0E-5)
-    parser.add_argument("--lr_pc", type=float, default=1.0E-5)
-    parser.add_argument("--lr_pa", type=float, default=1.0E-5)
-    parser.add_argument("--lr_e", type=float, default=1.0E-6)
-    parser.add_argument("--lr_c", type=float, default=1.0E-6)
-    parser.add_argument("--lr_a", type=float, default=1.0E-6)
+    parser.add_argument("--lr_pretrain", type=float, default=1.0E-4)
+    parser.add_argument("--lr_adapt", type=float, default=1.0E-4)
     parser.add_argument("--lr_interval", type=int, default=100)
     parser.add_argument("--lr_dim", type=float, default=0.2)
-    parser.add_argument('--wd', type=float, default=10e-5)
+    parser.add_argument('--weight_decay', type=float, default=1.0E-4)
     # Model settings
     parser.add_argument("--restore_path", type=str, default='')
     parser.add_argument("--num_class", type=int, default=2)
@@ -61,35 +57,35 @@ def main():
         args.device = torch.device('cpu')
 
     print(f"=== Loading datasets {args.dataset_name} ===")
-    data_factory_class = {
-        "visda": VisdaDataLoader,
-        "digit": DigitDataFactory,
-    }[args.dataset_name]
-    data_factory = data_factory_class(
+    data_factory = DigitDataFactory(
         args.positive_class, args.negative_class, args.batch_size,
-        args.mean, args.var, args.seed)
+        args.bag_size_mean, args.bag_size_var, args.valid_rate, args.seed)
+
+    dl_train_s, dl_valid_s = data_factory.get_train_data_loader(
+        args.source_dataset, args.train_length)
+    dl_test_s = data_factory.get_test_data_loader(
+        args.source_dataset, args.test_length)
+    dl_train_t, dl_valid_t = data_factory.get_train_data_loader(
+        args.target_dataset, args.train_length)
+    dl_test_t = data_factory.get_test_data_loader(
+        args.target_dataset, args.test_length)
+
     data_loaders = {
-        "source_train": data_factory.get_data_loader(
-            args.source_dataset, args.train_length),
-        "source_test": data_factory.get_data_loader(
-            args.source_dataset, args.test_length, train=False),
-        "target_train": data_factory.get_data_loader(
-            args.target_dataset, args.train_length),
-        "target_test": data_factory.get_data_loader(
-            args.target_dataset, args.test_length, train=False),
+        "source_train": dl_train_s,
+        "source_valid": dl_valid_s,
+        "source_test": dl_test_s,
+        "target_train": dl_train_t,
+        "target_valid": dl_valid_t,
+        "target_test": dl_test_t,
     }
 
     print("=== Loading models ===")
-    encoder_model = {
-        "visda": EncoderVisda,
-        "digit": EncoderDigit
-    }[args.dataset_name]
     encoder = init_model(
-        net=encoder_model(args.feat_dim), device=args.device,
-        restore=os.path.join(args.restore_path, 'pre_encoder.model'))
+        net=EncoderDigit(args.feat_dim), device=args.device,
+        restore=os.path.join(args.restore_path, 'encoder.model'))
     classifier_pre = init_model(
         net=Classifier(args.feat_dim, args.num_class), device=args.device,
-        restore=os.path.join(args.restore_path, 'pre_classifier.model'))
+        restore=os.path.join(args.restore_path, 'classifier.model'))
     classifier1 = init_model(
         net=Classifier(args.feat_dim, args.num_class), device=args.device,
         restore=None)
@@ -98,7 +94,7 @@ def main():
         restore=None)
     attention = init_model(
         net=Attention(args.feat_dim, args.num_class), device=args.device,
-        restore=os.path.join(args.restore_path, 'pre_attention.model'))
+        restore=os.path.join(args.restore_path, 'attention.model'))
 
     use_pretrained = (encoder.restored and classifier_pre.restored and attention.restored)
     if not use_pretrained:
@@ -108,8 +104,8 @@ def main():
         pretrain.train()
         pretrain.plotter.refresh()
 
-        pretrain.test('test', data_loaders["source_test"], data_category='source')
-        pretrain.test('test', data_loaders["target_test"], data_category='target')
+        pretrain.predict('test', data_loaders["source_test"], split_type='test', data_category='source')
+        pretrain.predict('test', data_loaders["target_test"], split_type='test', data_category='target')
         pretrain.plotter.flush('test')
 
         encoder = pretrain.encoder
@@ -124,8 +120,8 @@ def main():
     adapt.train()
     adapt.plotter.refresh()
 
-    adapt.test('test', data_loaders["source_test"], data_category='source')
-    adapt.test('test', data_loaders["target_test"], data_category='target')
+    adapt.predict('test', data_loaders["source_test"], split_type='test', data_category='source')
+    adapt.predict('test', data_loaders["target_test"], split_type='test', data_category='target')
     adapt.plotter.flush('test')
 
 

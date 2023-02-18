@@ -11,7 +11,7 @@ from torch.optim.lr_scheduler import StepLR
 from utils import evaluate, progress_report, Plotter
 
 
-class AdaptPMCDDA(object):
+class AdaptPMCDDA:
     def __init__(self, out_dir, encoder, classifier1, classifier2, attention, data_loaders, args):
         self.out_dir = out_dir
         self.plotter = Plotter(os.path.join(out_dir, "adapt"))
@@ -25,16 +25,16 @@ class AdaptPMCDDA(object):
 
         if "get_params" in [obj[0] for obj in inspect.getmembers(self.encoder, inspect.ismethod)]:
             self.optimizer_e = optim.Adam(
-                self.encoder.get_params(), lr=args.lr_e, weight_decay=args.wd)
+                self.encoder.get_params(), lr=args.lr_adapt, weight_decay=args.weight_decay)
         else:
             self.optimizer_e = optim.Adam(
-                self.encoder.parameters(), lr=args.lr_e, weight_decay=args.wd)
+                self.encoder.parameters(), lr=args.lr_adapt, weight_decay=args.weight_decay)
         self.optimizer_c1 = optim.Adam(
-            self.classifier1.parameters(), lr=args.lr_c, weight_decay=args.wd)
+            self.classifier1.parameters(), lr=args.lr_adapt, weight_decay=args.weight_decay)
         self.optimizer_c2 = optim.Adam(
-            self.classifier2.parameters(), lr=args.lr_c, weight_decay=args.wd)
+            self.classifier2.parameters(), lr=args.lr_adapt, weight_decay=args.weight_decay)
         self.optimizer_a = optim.Adam(
-            self.attention.parameters(), lr=args.lr_a, weight_decay=args.wd)
+            self.attention.parameters(), lr=args.lr_adapt, weight_decay=args.weight_decay)
 
         self.scheduler_e = StepLR(
             self.optimizer_e, step_size=args.lr_interval, gamma=args.lr_dim)
@@ -72,7 +72,7 @@ class AdaptPMCDDA(object):
         pred_cls_list = np.empty((0, 2), np.float32)
         gt_cls_list = np.empty(0, np.float32)
         start_time = time.time()
-        labeled_sample_sum = [0]*int(self.args.mean * 2)
+        labeled_sample_sum = [0]*int(self.args.bag_size_mean * 2)
         max_sample_num = labeled_num // len(self.data_loaders["target_train"]) + 1
 
         data_zip = enumerate(zip(
@@ -176,7 +176,6 @@ class AdaptPMCDDA(object):
                 train_loss_d2 += loss_dis.data
 
             # 4. Optimize Attention model (target data supervised learning)
-            # source
             self.reset_grad()
             feat_src = self.encoder(source_data)
             pred_src, _ = self.attention(feat_src)
@@ -218,18 +217,18 @@ class AdaptPMCDDA(object):
         criterion = nn.CrossEntropyLoss().to(self.args.device)
         labeled_num = 0
 
-        for epoch in range(self.args.num_epochs):
+        for epoch in range(self.args.num_epochs_adapt):
             self.update(epoch, labeled_num, criterion)
-            cls_score, ins_score = self.test(
-                epoch, self.data_loaders["source_test"], data_category='source')
-            self.test(epoch, self.data_loaders["target_test"], data_category='target')
+            cls_score, ins_score = self.predict(
+                epoch, self.data_loaders["source_valid"], split_type='valid', data_category='source')
+            self.predict(epoch, self.data_loaders["target_valid"], split_type='valid', data_category='target')
             labeled_num = self.labeling(epoch, cls_score, ins_score)
 
             self.scheduler_step()
             self.plotter.flush(epoch)
 
-    def test(self, epoch, test_data_loader, data_category=None):
-        print(f"{data_category} test")
+    def predict(self, epoch, data_loader, split_type='test', data_category=None):
+        print(f"{split_type} {data_category}")
         self.encoder.eval()
         self.classifier1.eval()
         self.classifier2.eval()
@@ -237,7 +236,7 @@ class AdaptPMCDDA(object):
         criterion = nn.CrossEntropyLoss().to(self.args.device)
 
         # init loss and accuracy
-        len_data = len(test_data_loader.dataset)
+        len_data = len(data_loader.dataset)
         loss_cls = loss_bag = loss_ins = 0
         pred_cls_list = np.empty((0, self.args.num_class), np.float32)
         pred_bag_list = np.empty((0, self.args.num_class), np.float32)
@@ -248,7 +247,7 @@ class AdaptPMCDDA(object):
         start_time = time.time()
 
         with torch.no_grad():
-            for step, batch in enumerate(test_data_loader):
+            for step, batch in enumerate(data_loader):
                 data, label, _ = batch
 
                 bag_label = label[0].long()
@@ -277,25 +276,26 @@ class AdaptPMCDDA(object):
                 gt_bag_list = np.append(gt_bag_list, np.array(bag_label.data.cpu()), axis=0)
                 feature_list = np.append(feature_list, np.array(mid_feature.data.cpu()), axis=0)
 
-                progress_report('test', step, start_time, self.args.batch_size, len_data)
+                progress_report(split_type, step, start_time, self.args.batch_size, len_data)
 
-        self.plotter.record(epoch, f'test_{data_category}_classifier_loss', loss_cls / len_data)
-        self.plotter.record(epoch, f'test_{data_category}_instance_loss', loss_ins / len_data)
-        self.plotter.record(epoch, f'test_{data_category}_bag_loss', loss_bag / len_data)
-        evaluate(self.plotter, epoch, f'test_{data_category}_bag', pred_bag_list, gt_bag_list)
-        cls_score = evaluate(self.plotter, epoch, f'test_{data_category}_classifier', pred_cls_list, gt_cls_list)
-        ins_score = evaluate(self.plotter, epoch, f'test_{data_category}_instance', pred_ins_list, gt_cls_list)
+        self.plotter.record(epoch, f'{split_type}_{data_category}_classifier_loss', loss_cls / len_data)
+        self.plotter.record(epoch, f'{split_type}_{data_category}_instance_loss', loss_ins / len_data)
+        self.plotter.record(epoch, f'{split_type}_{data_category}_bag_loss', loss_bag / len_data)
+        evaluate(self.plotter, epoch, f'{split_type}_{data_category}_bag', pred_bag_list, gt_bag_list)
+        cls_score = evaluate(self.plotter, epoch, f'{split_type}_{data_category}_classifier', pred_cls_list, gt_cls_list)
+        ins_score = evaluate(self.plotter, epoch, f'{split_type}_{data_category}_instance', pred_ins_list, gt_cls_list)
 
-        self.plotter.save_files({
-            f'adapt_feature_{data_category}.npy': feature_list,
-            f'adapt_label_{data_category}.npy': gt_cls_list,
-        })
-        self.plotter.save_models({
-            "encoder.model": self.encoder,
-            "classifier1.model": self.classifier1,
-            "classifier2.model": self.classifier2,
-            "attention.model": self.attention
-        })
+        if data_category == "target" and split_type == 'valid':
+            self.plotter.save_files({
+                f'feature_{data_category}.npy': feature_list,
+                f'label_{data_category}.npy': gt_cls_list,
+            }, cls_score)
+            self.plotter.save_models({
+                "encoder.model": self.encoder,
+                "classifier1.model": self.classifier1,
+                "classifier2.model": self.classifier2,
+                "attention.model": self.attention
+            }, cls_score)
 
         return cls_score, ins_score
 
@@ -370,7 +370,7 @@ class AdaptPMCDDA(object):
         # Evaluate label accuracy
         true_label = np.concatenate((gt_list[pos_idx], gt_list[neg_idx]))
         new_label = np.concatenate((np.ones(len(pos_idx)), np.zeros(len(neg_idx))))
-        pseudo_label_acc = np.mean(new_label == true_label)
+        pseudo_label_acc = np.mean(new_label == true_label) if len(new_label) > 0 else 0.0
         self.plotter.record(epoch, "pseudo_label_accuracy", pseudo_label_acc)
         self.plotter.record(epoch, "pseudo_label_number", len(new_label))
 

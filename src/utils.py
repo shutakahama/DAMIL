@@ -49,6 +49,7 @@ def evaluate(plotter, epoch, data_name, pred_list, gt_list):
 
 
 def create_output_dir(args):
+    os.makedirs(os.path.join(os.path.curdir, args.log_dir), exist_ok=True)
     # Create or Overwrite the log directory
     for past_log in os.listdir(os.path.join(os.path.curdir, args.log_dir)):
         if past_log[7:] == args.out or past_log[9:] == args.out:
@@ -77,18 +78,23 @@ class Plotter:
     def __init__(self, out_dir):
         self.out_dir = out_dir
         self.logs = defaultdict(lambda: {})
+        self.best_score = 0.0
 
         os.makedirs(os.path.join(out_dir, 'plot'), exist_ok=True)
         os.makedirs(os.path.join(out_dir, 'model'), exist_ok=True)
         os.makedirs(os.path.join(out_dir, 'feature'), exist_ok=True)
 
-    def save_files(self, files):
-        for file_name, file in files.items():
-            np.save(os.path.join(self.out_dir, 'feature', file_name), file)
+    def save_files(self, files, score):
+        if self.best_score <= score:
+            for file_name, file in files.items():
+                np.save(os.path.join(self.out_dir, 'feature', file_name), file)
 
-    def save_models(self, models):
-        for model_name, model in models.items():
-            torch.save(model.state_dict(), os.path.join(self.out_dir, 'model', model_name))
+    def save_models(self, models, score):
+        if self.best_score <= score:
+            print(f"Best score {score}. Models are saved.")
+            self.best_score = score
+            for model_name, model in models.items():
+                torch.save(model.state_dict(), os.path.join(self.out_dir, 'model', model_name))
 
     def record(self, epoch, name, value):
         self.logs[name][epoch] = value
