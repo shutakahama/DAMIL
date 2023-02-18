@@ -5,7 +5,7 @@ import argparse
 from dataset_digit import DigitDataFactory
 from core import AdaptPMCDDA, PretrainParallel
 from models import EncoderDigit, Classifier, Attention
-from utils import init_model, create_output_dir
+from utils import init_model, create_output_dir, logger
 
 
 def parse_args():
@@ -56,7 +56,7 @@ def main():
     else:
         args.device = torch.device('cpu')
 
-    print(f"=== Loading datasets {args.dataset_name} ===")
+    logger.info(f"=== Loading datasets {args.dataset_name} ===")
     data_factory = DigitDataFactory(
         args.positive_class, args.negative_class, args.batch_size,
         args.bag_size_mean, args.bag_size_var, args.valid_rate, args.seed)
@@ -79,7 +79,7 @@ def main():
         "target_test": dl_test_t,
     }
 
-    print("=== Loading models ===")
+    logger.info("=== Loading models ===")
     encoder = init_model(
         net=EncoderDigit(args.feat_dim), device=args.device,
         restore=os.path.join(args.restore_path, 'encoder.model'))
@@ -98,31 +98,33 @@ def main():
 
     use_pretrained = (encoder.restored and classifier_pre.restored and attention.restored)
     if not use_pretrained:
-        print("=== Pre-training classifier ===")
+        logger.info("=== Pre-training classifier ===")
         pretrain = PretrainParallel(
             out_dir, encoder, classifier_pre, attention, data_loaders, args)
         pretrain.train()
         pretrain.plotter.refresh()
 
+        logger.info("=== Pre-training evaluation ===")
         pretrain.predict('test', data_loaders["source_test"], split_type='test', data_category='source')
         pretrain.predict('test', data_loaders["target_test"], split_type='test', data_category='target')
-        pretrain.plotter.flush('test')
+        pretrain.plotter.flush('test', plot_flag=False)
 
         encoder = pretrain.encoder
         attention = pretrain.attention
         classifier1 = pretrain.classifier  # not initialize classifier ???
         classifier2 = pretrain.classifier
 
-    print("=== Training with Domain Adaptaion ===")
+    logger.info("=== Adaptation Training ===")
     adapt = AdaptPMCDDA(
         out_dir, encoder, classifier1, classifier2, attention, data_loaders, args)
 
     adapt.train()
     adapt.plotter.refresh()
 
+    logger.info("=== Adaptation evaluation ===")
     adapt.predict('test', data_loaders["source_test"], split_type='test', data_category='source')
     adapt.predict('test', data_loaders["target_test"], split_type='test', data_category='target')
-    adapt.plotter.flush('test')
+    adapt.plotter.flush('test', plot_flag=False)
 
 
 if __name__ == '__main__':

@@ -1,4 +1,5 @@
 import os
+import logging
 from collections import defaultdict
 import json
 import sys
@@ -11,15 +12,22 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import torch
 import torch.backends.cudnn as cudnn
-from sklearn.metrics import roc_auc_score, average_precision_score
+from sklearn.metrics import average_precision_score
 
 
-def progress_report(epoch, count, start_time, batchsize, whole_sample):
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+def progress_report(phase, count, start_time, batchsize, whole_sample, is_last):
     duration = time.time() - start_time
+    interval = str(datetime.timedelta(seconds=int(duration)))
     throughput = count * batchsize / duration
-    sys.stderr.write(
-        '\r epoch {}: {} updates ({} / {} samples) time: {} ({:.2f} samples/sec)'.format(
-        epoch, count, count * batchsize, whole_sample, str(datetime.timedelta(seconds=int(duration))), throughput))
+    sys.stdout.write(
+        f'\r{phase}: {count} updates ({count * batchsize} / {whole_sample} samples)'
+        f'time: {interval} ({throughput:.2f} samples/sec)')
+    if is_last:
+        sys.stdout.write('\r\n')
 
 
 def init_model(net, device, restore):
@@ -27,7 +35,7 @@ def init_model(net, device, restore):
     if restore is not None and os.path.exists(restore):
         net.load_state_dict(torch.load(restore))
         net.restored = True
-        print("Load existing model from: {}".format(os.path.abspath(restore)))
+        logger.info(f"Load existing model from: {os.path.abspath(restore)}")
 
     # check if cuda is available
     if torch.cuda.is_available():
@@ -38,12 +46,9 @@ def init_model(net, device, restore):
 
 def evaluate(plotter, epoch, data_name, pred_list, gt_list):
     acc = np.mean(np.array(gt_list) == np.argmax(pred_list, axis=1))
-    roc_auc = roc_auc_score(gt_list, pred_list[:, 1])
     pr_auc = average_precision_score(gt_list, pred_list[:, 1])
     plotter.record(epoch, f'{data_name}_accuracy', acc)
     plotter.record(epoch, f'{data_name}_pr_auc', pr_auc)
-    if "target" in data_name:
-        plotter.record(epoch, f'{data_name}_roc_auc', roc_auc)
 
     return pr_auc
 
@@ -53,13 +58,13 @@ def create_output_dir(args):
     # Create or Overwrite the log directory
     for past_log in os.listdir(os.path.join(os.path.curdir, args.log_dir)):
         if past_log[7:] == args.out or past_log[9:] == args.out:
-            ans = input('overwrite "{}" (y/n)'.format(past_log))
+            ans = input(f'overwrite "{past_log}" (y/n)')
             if ans == 'y' or ans == 'Y':
-                print('move existing directory to dump')
+                print('\nmove existing directory to dump')
                 past_dir = os.path.join(os.path.curdir, args.log_dir, past_log)
                 shutil.rmtree(past_dir)
             else:
-                print('try again')
+                print('\ntry again')
                 exit()
     else:
         out = datetime.datetime.now().strftime('%m%d%H%M') + '_' + args.out
@@ -91,7 +96,7 @@ class Plotter:
 
     def save_models(self, models, score):
         if self.best_score <= score:
-            print(f"Best score {score}. Models are saved.")
+            logger.info(f"Best score {score}. Models are saved.")
             self.best_score = score
             for model_name, model in models.items():
                 torch.save(model.state_dict(), os.path.join(self.out_dir, 'model', model_name))
@@ -102,20 +107,23 @@ class Plotter:
     def refresh(self):
         self.logs = defaultdict(lambda: {})
 
-    def flush(self, epoch):
+    def flush(self, epoch, plot_flag=True):
         log = f"epoch {epoch}\n"
 
-        for name, vals in self.logs.items():
-            log += " {}\t{:.5f}\n".format(name, vals[epoch])
+        keys = sorted(self.logs.keys())
+        for name in keys:
+            vals = self.logs[name]
+            log += f" {name}\t{vals[epoch]:.5f}\n"
 
-            x_vals = np.sort(list(vals.keys()))
-            y_vals = [vals[x] for x in x_vals]
+            if plot_flag:
+                x_vals = np.sort(list(vals.keys()))
+                y_vals = [vals[x] for x in x_vals]
 
-            plt.clf()
-            plt.plot(x_vals, y_vals)
-            plt.xlabel('iteration')
-            plt.ylabel(name)
-            plt.savefig(os.path.join(self.out_dir, 'plot', name.replace(' ', '_') + '.jpg'))
+                plt.clf()
+                plt.plot(x_vals, y_vals)
+                plt.xlabel('iteration')
+                plt.ylabel(name)
+                plt.savefig(os.path.join(self.out_dir, 'plot', name.replace(' ', '_') + '.jpg'))
 
         with open(os.path.join(self.out_dir, 'log'), 'a+') as f:
             f.write(log + '\n')

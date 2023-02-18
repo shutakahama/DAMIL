@@ -8,7 +8,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import StepLR
 
-from utils import evaluate, progress_report, Plotter
+from utils import evaluate, progress_report, Plotter, logger
 
 
 class PretrainParallel:
@@ -55,7 +55,6 @@ class PretrainParallel:
         self.scheduler_a.step()
 
     def train(self):
-        print("train")
         self.encoder.train()
         self.classifier.train()
         self.attention.train()
@@ -63,6 +62,7 @@ class PretrainParallel:
         criterion = nn.CrossEntropyLoss().to(self.args.device)
 
         for epoch in range(self.args.num_epochs_pre):
+            logger.info(f"epoch: {epoch}")
             train_loss_s = train_loss_t = 0
             pred_cls_list = np.empty((0, 2), np.float32)
             pred_bag_list = np.empty((0, 2), np.float32)
@@ -121,7 +121,8 @@ class PretrainParallel:
                 gt_bag_list = np.append(gt_bag_list, np.max(target_instance_label.data.cpu().numpy(), keepdims=True), axis=0)
                 gt_ins_list = np.append(gt_ins_list, np.array(target_instance_label.data.cpu()), axis=0)
 
-                progress_report(epoch, step, start_time, self.args.batch_size, self.len_data_loader)
+                is_last = (step + 1 == self.len_data_loader)
+                progress_report("train", step, start_time, self.args.batch_size, self.len_data_loader, is_last)
 
             self.scheduler_step()
 
@@ -136,7 +137,6 @@ class PretrainParallel:
             self.plotter.flush(epoch)
 
     def predict(self, epoch, data_loader, split_type='test', data_category='source'):
-        print(f"{split_type} {data_category}")
         self.encoder.eval()
         self.classifier.eval()
         self.attention.eval()
@@ -152,6 +152,7 @@ class PretrainParallel:
         gt_bag_list = np.empty(0, np.float32)
         feature_list = np.empty((0, self.args.feat_dim), np.float32)
         start_time = time.time()
+        phase = f"{split_type} {data_category}"
 
         with torch.no_grad():
             for step, batch in enumerate(data_loader):
@@ -181,7 +182,8 @@ class PretrainParallel:
                     pred_ins_list = np.append(pred_ins_list, np.array(F.softmax(pred_att.data.cpu(), dim=1)), axis=0)
                     gt_bag_list = np.append(gt_bag_list, np.max(instance_label.data.cpu().numpy(), keepdims=True), axis=0)
 
-                progress_report(split_type, step, start_time, self.args.batch_size, len_data)
+                is_last = (step + 1 == len_data)
+                progress_report(phase, step, start_time, self.args.batch_size, len_data, is_last)
 
         self.plotter.record(epoch, f'{split_type}_{data_category}_classifier_loss', loss_cls / len_data)
         score = evaluate(self.plotter, epoch, f'{split_type}_{data_category}_classifier', pred_cls_list, gt_cls_list)

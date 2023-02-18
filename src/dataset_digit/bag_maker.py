@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.utils.data as data_utils
 from torchvision.datasets import MNIST, SVHN
+from utils import logger
 
 
 class BagMaker(data_utils.Dataset):
@@ -57,7 +58,7 @@ class BagMaker(data_utils.Dataset):
         else:
             data_neg = data[labels != self.positive_number]
         data_pos, data_neg = self.r.permutation(data_pos), self.r.permutation(data_neg)
-        print(
+        logger.info(
             f"{dataset_name}_{'train' if train else 'test'}"
             f"-> all data: {len(data)}, positive: {len(data_pos)}, negative: {len(data_neg)}")
 
@@ -93,6 +94,6 @@ class BagMaker(data_utils.Dataset):
             pos_idx += pos_length
             neg_idx += neg_length
 
-        print(f"{dataset_name}_{'train' if train else 'test'} -> pos: {pos_idx}, neg: {neg_idx}")
+        logger.info(f"{dataset_name}_{'train' if train else 'test'} -> pos: {pos_idx}, neg: {neg_idx}")
 
         return bag_list, label_list

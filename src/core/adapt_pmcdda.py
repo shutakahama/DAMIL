@@ -8,7 +8,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import StepLR
 
-from utils import evaluate, progress_report, Plotter
+from utils import evaluate, progress_report, Plotter, logger
 
 
 class AdaptPMCDDA:
@@ -68,7 +68,7 @@ class AdaptPMCDDA:
             torch.abs(torch.softmax(out1, dim=1) - torch.softmax(out2, dim=1)))
 
     def update(self, epoch, labeled_num, criterion):
-        train_loss_m = train_loss_a = train_loss_d1 = train_loss_d2 = 0
+        train_loss_c = train_loss_a = train_loss_d1 = train_loss_d2 = 0
         pred_cls_list = np.empty((0, 2), np.float32)
         gt_cls_list = np.empty(0, np.float32)
         start_time = time.time()
@@ -131,24 +131,24 @@ class AdaptPMCDDA:
             # for mix
             # 1. Optimize Classifier model with source data
             self.reset_grad()
-            feat_m = self.encoder(mix_data)
-            output_m1 = self.classifier1(feat_m)
-            output_m2 = self.classifier2(feat_m)
+            feat_mix = self.encoder(mix_data)
+            output_m1 = self.classifier1(feat_mix)
+            output_m2 = self.classifier2(feat_mix)
 
             loss_m1 = criterion(output_m1, mix_label)
             loss_m2 = criterion(output_m2, mix_label)
-            loss_m = loss_m1 + loss_m2
-            loss_m.backward()
+            loss_c = loss_m1 + loss_m2
+            loss_c.backward()
             self.optimizer_c1.step()
             self.optimizer_c2.step()
             self.optimizer_e.step()
-            train_loss_m += loss_m.data
+            train_loss_c += loss_c.data
 
             # 2. maximize discrepancy (MCDDA) for mix data
             self.reset_grad()
-            feat_m = self.encoder(mix_data)
-            output_m1 = self.classifier1(feat_m)
-            output_m2 = self.classifier2(feat_m)
+            feat_mix = self.encoder(mix_data)
+            output_m1 = self.classifier1(feat_mix)
+            output_m2 = self.classifier2(feat_mix)
             feat_tgt = self.encoder(target_data)
             output_t1 = self.classifier1(feat_tgt)
             output_t2 = self.classifier2(feat_tgt)
@@ -198,17 +198,17 @@ class AdaptPMCDDA:
             pred_cls_list = np.append(pred_cls_list, np.array(F.softmax(output_t.data.cpu(), dim=1)), axis=0)
             gt_cls_list = np.append(gt_cls_list, np.array(target_instance_label.data.cpu()), axis=0)
 
-            progress_report(epoch, step, start_time, self.args.batch_size, self.len_data_loader)
+            is_last = (step + 1 == self.len_data_loader)
+            progress_report("train", step, start_time, self.args.batch_size, self.len_data_loader, is_last)
 
-        self.plotter.record(epoch, 'train_mix_classifier_loss', train_loss_m / self.len_data_loader)
+        self.plotter.record(epoch, 'train_classifier_loss', train_loss_c / self.len_data_loader)
         self.plotter.record(epoch, 'train_attention_loss', train_loss_a / self.len_data_loader)
         self.plotter.record(epoch, 'train_max_dis_loss', train_loss_d1 / self.len_data_loader)
         self.plotter.record(epoch, 'train_min_dis_loss', train_loss_d2 / self.len_data_loader)
         evaluate(self.plotter, epoch, 'train_target_classifier', pred_cls_list, gt_cls_list)
-        print(f"labeled sample num: {labeled_sample_sum}")
+        # logger.info(f"Distribution of the number of labeled samples: {labeled_sample_sum}")
 
     def train(self):
-        print("train")
         self.encoder.train()
         self.classifier1.train()
         self.classifier2.train()
@@ -218,6 +218,7 @@ class AdaptPMCDDA:
         labeled_num = 0
 
         for epoch in range(self.args.num_epochs_adapt):
+            logger.info(f"epoch: {epoch}")
             self.update(epoch, labeled_num, criterion)
             cls_score, ins_score = self.predict(
                 epoch, self.data_loaders["source_valid"], split_type='valid', data_category='source')
@@ -228,7 +229,6 @@ class AdaptPMCDDA:
             self.plotter.flush(epoch)
 
     def predict(self, epoch, data_loader, split_type='test', data_category=None):
-        print(f"{split_type} {data_category}")
         self.encoder.eval()
         self.classifier1.eval()
         self.classifier2.eval()
@@ -245,6 +245,7 @@ class AdaptPMCDDA:
         gt_bag_list = np.empty(0, np.float32)
         feature_list = np.empty((0, self.args.feat_dim), np.float32)
         start_time = time.time()
+        phase = f"{split_type} {data_category}"
 
         with torch.no_grad():
             for step, batch in enumerate(data_loader):
@@ -276,7 +277,8 @@ class AdaptPMCDDA:
                 gt_bag_list = np.append(gt_bag_list, np.array(bag_label.data.cpu()), axis=0)
                 feature_list = np.append(feature_list, np.array(mid_feature.data.cpu()), axis=0)
 
-                progress_report(split_type, step, start_time, self.args.batch_size, len_data)
+                is_last = (step + 1 == len_data)
+                progress_report(phase, step, start_time, self.args.batch_size, len_data, is_last)
 
         self.plotter.record(epoch, f'{split_type}_{data_category}_classifier_loss', loss_cls / len_data)
         self.plotter.record(epoch, f'{split_type}_{data_category}_instance_loss', loss_ins / len_data)
@@ -300,7 +302,6 @@ class AdaptPMCDDA:
         return cls_score, ins_score
 
     def labeling(self, epoch, cls_score, ins_score):
-        print("pseudo labeling")
         self.encoder.eval()
         self.classifier1.eval()
         self.classifier2.eval()
@@ -323,22 +324,22 @@ class AdaptPMCDDA:
                 data = data.squeeze(0)
                 data = data.requires_grad_().to(self.args.device)
 
-                if bag_label == 0:  # give labels only to positive bags
-                    continue
+                # give labels only to positive bags
+                if bag_label == 1:
+                    mid_feature = self.encoder(data)
+                    pred_cls1 = self.classifier1(mid_feature)
+                    pred_cls2 = self.classifier2(mid_feature)
+                    pred_cls = (pred_cls1 + pred_cls2) / 2
+                    _, _pred_att = self.attention(mid_feature)
+                    _pred_att = torch.unsqueeze(_pred_att.reshape(-1), dim=0)
+                    pred_att = torch.cat((1 - _pred_att, _pred_att), dim=0).T
+                    pred1_list = np.append(pred1_list, np.array(F.softmax(pred_cls.data.cpu(), dim=1)), axis=0)
+                    pred2_list = np.append(pred2_list, np.array(F.softmax(pred_att.data.cpu(), dim=1)), axis=0)
+                    gt_list = np.append(gt_list, np.array(instance_label), axis=0)
+                    idx_list = np.append(idx_list, np.array(index), axis=0)
 
-                mid_feature = self.encoder(data)
-                pred_cls1 = self.classifier1(mid_feature)
-                pred_cls2 = self.classifier2(mid_feature)
-                pred_cls = (pred_cls1 + pred_cls2) / 2
-                _, _pred_att = self.attention(mid_feature)
-                _pred_att = torch.unsqueeze(_pred_att.reshape(-1), dim=0)
-                pred_att = torch.cat((1 - _pred_att, _pred_att), dim=0).T
-                pred1_list = np.append(pred1_list, np.array(F.softmax(pred_cls.data.cpu(), dim=1)), axis=0)
-                pred2_list = np.append(pred2_list, np.array(F.softmax(pred_att.data.cpu(), dim=1)), axis=0)
-                gt_list = np.append(gt_list, np.array(instance_label), axis=0)
-                idx_list = np.append(idx_list, np.array(index), axis=0)
-
-                progress_report('labeling', step, start_time, self.args.batch_size, len_data)
+                is_last = (step + 1 == len_data)
+                progress_report("pseudo labeling", step, start_time, self.args.batch_size, len_data, is_last)
 
         labeling_num = self.give_pseudo_label(
             epoch, pred1_list, pred2_list, gt_list, idx_list, cls_score, ins_score)
@@ -361,11 +362,11 @@ class AdaptPMCDDA:
         _pos_idx, _neg_idx = np.argsort(-pos_val_cand)[:num_pos], np.argsort(-neg_val_cand)[:num_neg]
         pos_idx, neg_idx = pos_idx_cand[_pos_idx], neg_idx_cand[_neg_idx]
 
-        print(f"Labeled Number: pos -> {len(pos_idx)}, neg -> {len(neg_idx)}")
+        logger.info(f"Number of labeled instances: pos -> {len(pos_idx)}, neg -> {len(neg_idx)}")
         if num > 0:
             pos_score_min = -np.sort(-pos_val_cand)[num_pos - 1]
             neg_score_min = -np.sort(-pos_val_cand)[num_pos - 1]
-            print(f"Minimum labeling score: pos -> {pos_score_min} neg -> {neg_score_min}")
+            logger.info(f"Munimum labeling score: pos -> {pos_score_min} neg -> {neg_score_min}")
 
         # Evaluate label accuracy
         true_label = np.concatenate((gt_list[pos_idx], gt_list[neg_idx]))
