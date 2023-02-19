@@ -2,13 +2,16 @@ import os
 import time
 import inspect
 import numpy as np
+import logging
 import torch
 from torch import nn
 import torch.optim as optim
 import torch.nn.functional as F
-from torch.optim.lr_scheduler import StepLR
 
-from utils import evaluate, progress_report, Plotter, logger
+from utils import evaluate, progress_report, Plotter
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class PretrainParallel:
@@ -32,13 +35,6 @@ class PretrainParallel:
         self.optimizer_a = optim.Adam(
             self.attention.parameters(), lr=args.lr_pretrain, weight_decay=args.weight_decay)
 
-        self.scheduler_e = StepLR(
-            self.optimizer_e, step_size=args.lr_interval, gamma=args.lr_dim)
-        self.scheduler_c = StepLR(
-            self.optimizer_c, step_size=args.lr_interval, gamma=args.lr_dim)
-        self.scheduler_a = StepLR(
-            self.optimizer_a, step_size=args.lr_interval, gamma=args.lr_dim)
-
         self.len_data_loader = min(
             len(self.data_loaders["source_train"].dataset),
             len(self.data_loaders["target_train"].dataset)
@@ -48,11 +44,6 @@ class PretrainParallel:
         self.optimizer_e.zero_grad()
         self.optimizer_c.zero_grad()
         self.optimizer_a.zero_grad()
-
-    def scheduler_step(self):
-        self.scheduler_e.step()
-        self.scheduler_c.step()
-        self.scheduler_a.step()
 
     def train(self):
         self.encoder.train()
@@ -122,9 +113,7 @@ class PretrainParallel:
                 gt_ins_list = np.append(gt_ins_list, np.array(target_instance_label.data.cpu()), axis=0)
 
                 is_last = (step + 1 == self.len_data_loader)
-                progress_report("train", step, start_time, self.args.batch_size, self.len_data_loader, is_last)
-
-            self.scheduler_step()
+                progress_report("train", step, start_time, 1, self.len_data_loader, is_last)
 
             self.plotter.record(epoch, 'train_source_loss', train_loss_s/self.len_data_loader)
             self.plotter.record(epoch, 'train_target_loss', train_loss_t/self.len_data_loader)
@@ -183,7 +172,7 @@ class PretrainParallel:
                     gt_bag_list = np.append(gt_bag_list, np.max(instance_label.data.cpu().numpy(), keepdims=True), axis=0)
 
                 is_last = (step + 1 == len_data)
-                progress_report(phase, step, start_time, self.args.batch_size, len_data, is_last)
+                progress_report(phase, step, start_time, 1, len_data, is_last)
 
         self.plotter.record(epoch, f'{split_type}_{data_category}_classifier_loss', loss_cls / len_data)
         score = evaluate(self.plotter, epoch, f'{split_type}_{data_category}_classifier', pred_cls_list, gt_cls_list)

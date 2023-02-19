@@ -1,11 +1,15 @@
 import os
 import torch
 import argparse
+import logging
 
 from dataset_digit import DigitDataFactory
 from core import AdaptPMCDDA, PretrainParallel
 from models import EncoderDigit, Classifier, Attention
-from utils import init_model, create_output_dir, logger
+from utils import init_model, create_output_dir
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def parse_args():
@@ -13,11 +17,8 @@ def parse_args():
     parser.add_argument("out")
     # Basic settings
     parser.add_argument('--log_dir', default='result_logs')
-    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--random_seed", type=int, default=1)
     parser.add_argument("--gpu", "-g", type=int, default=-1)
-    parser.add_argument("--batch_size", "-b", type=int, default=1)
-    parser.add_argument("--num_epochs_pre", type=int, default=50)
-    parser.add_argument("--num_epochs_adapt", type=int, default=100)
     # Dataset settings
     parser.add_argument("--dataset_name", type=str, default='digit')
     parser.add_argument("--source_dataset", type=str, default='mnist')
@@ -30,10 +31,10 @@ def parse_args():
     parser.add_argument("--bag_size_var", type=float, default=2)
     parser.add_argument("--valid_rate", type=int, default=0.2)
     # Training settings
+    parser.add_argument("--num_epochs_pre", type=int, default=50)
+    parser.add_argument("--num_epochs_adapt", type=int, default=100)
     parser.add_argument("--lr_pretrain", type=float, default=1.0E-4)
     parser.add_argument("--lr_adapt", type=float, default=1.0E-4)
-    parser.add_argument("--lr_interval", type=int, default=100)
-    parser.add_argument("--lr_dim", type=float, default=0.2)
     parser.add_argument('--weight_decay', type=float, default=1.0E-4)
     # Model settings
     parser.add_argument("--restore_path", type=str, default='')
@@ -49,7 +50,7 @@ def main():
     args = parse_args()
     out_dir = create_output_dir(args)
 
-    torch.manual_seed(args.seed)
+    torch.manual_seed(args.random_seed)
 
     if torch.cuda.is_available() and args.gpu >= 0:
         args.device = torch.device(args.gpu)
@@ -58,8 +59,8 @@ def main():
 
     logger.info(f"=== Loading datasets {args.dataset_name} ===")
     data_factory = DigitDataFactory(
-        args.positive_class, args.negative_class, args.batch_size,
-        args.bag_size_mean, args.bag_size_var, args.valid_rate, args.seed)
+        args.positive_class, args.negative_class, args.bag_size_mean, args.bag_size_var,
+        args.valid_rate, args.random_seed)
 
     dl_train_s, dl_valid_s = data_factory.get_train_data_loader(
         args.source_dataset, args.train_length)

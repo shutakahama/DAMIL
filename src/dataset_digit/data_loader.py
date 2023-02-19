@@ -28,10 +28,8 @@ class DigitBagLoader(data_utils.Dataset):
 
 class DigitDataFactory:
     def __init__(
-        self, positive_number, negative_number, batch_size,
-        bag_size_mean, bag_size_var, valid_rate, seed):
+        self, positive_number, negative_number, bag_size_mean, bag_size_var, valid_rate, seed):
 
-        self.batch_size = batch_size
         self.valid_rate = valid_rate
         self.bag_maker = BagMaker(
             positive_number, negative_number, bag_size_mean, bag_size_var, seed)
@@ -44,12 +42,12 @@ class DigitDataFactory:
             images, labels, test_size=self.valid_rate, stratify=bag_labels)
         train_data_loader = data_utils.DataLoader(
             DigitBagLoader(train_images, train_labels),
-            batch_size=self.batch_size,
+            batch_size=1,
             shuffle=True,
             **self.loader_kwargs)
         valid_data_loader = data_utils.DataLoader(
             DigitBagLoader(valid_images, valid_labels),
-            batch_size=self.batch_size,
+            batch_size=1,
             shuffle=True,
             **self.loader_kwargs)
 
@@ -59,7 +57,7 @@ class DigitDataFactory:
         images, labels = self.bag_maker.random_bags_form(dataset_name, nums_bag, train=False)
         data_loader = data_utils.DataLoader(
             DigitBagLoader(images, labels),
-            batch_size=self.batch_size,
+            batch_size=1,
             shuffle=False,
             **self.loader_kwargs)
 

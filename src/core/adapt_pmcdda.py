@@ -2,13 +2,16 @@ import os
 import inspect
 import time
 import numpy as np
+import logging
 import torch
 import torch.optim as optim
 from torch import nn
 import torch.nn.functional as F
-from torch.optim.lr_scheduler import StepLR
 
-from utils import evaluate, progress_report, Plotter, logger
+from utils import evaluate, progress_report, Plotter
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class AdaptPMCDDA:
@@ -36,15 +39,6 @@ class AdaptPMCDDA:
         self.optimizer_a = optim.Adam(
             self.attention.parameters(), lr=args.lr_adapt, weight_decay=args.weight_decay)
 
-        self.scheduler_e = StepLR(
-            self.optimizer_e, step_size=args.lr_interval, gamma=args.lr_dim)
-        self.scheduler_c1 = StepLR(
-            self.optimizer_c1, step_size=args.lr_interval, gamma=args.lr_dim)
-        self.scheduler_c2 = StepLR(
-            self.optimizer_c2, step_size=args.lr_interval, gamma=args.lr_dim)
-        self.scheduler_a = StepLR(
-            self.optimizer_a, step_size=args.lr_interval, gamma=args.lr_dim)
-
         self.len_data_loader = min(
             len(self.data_loaders["source_train"].dataset),
             len(self.data_loaders["target_train"].dataset)
@@ -55,12 +49,6 @@ class AdaptPMCDDA:
         self.optimizer_c1.zero_grad()
         self.optimizer_c2.zero_grad()
         self.optimizer_a.zero_grad()
-
-    def scheduler_step(self):
-        self.scheduler_e.step()
-        self.scheduler_c1.step()
-        self.scheduler_c2.step()
-        self.scheduler_a.step()
 
     @staticmethod
     def discrepancy(out1, out2):
@@ -199,7 +187,7 @@ class AdaptPMCDDA:
             gt_cls_list = np.append(gt_cls_list, np.array(target_instance_label.data.cpu()), axis=0)
 
             is_last = (step + 1 == self.len_data_loader)
-            progress_report("train", step, start_time, self.args.batch_size, self.len_data_loader, is_last)
+            progress_report("train", step, start_time, 1, self.len_data_loader, is_last)
 
         self.plotter.record(epoch, 'train_classifier_loss', train_loss_c / self.len_data_loader)
         self.plotter.record(epoch, 'train_attention_loss', train_loss_a / self.len_data_loader)
@@ -225,7 +213,6 @@ class AdaptPMCDDA:
             self.predict(epoch, self.data_loaders["target_valid"], split_type='valid', data_category='target')
             labeled_num = self.labeling(epoch, cls_score, ins_score)
 
-            self.scheduler_step()
             self.plotter.flush(epoch)
 
     def predict(self, epoch, data_loader, split_type='test', data_category=None):
@@ -278,7 +265,7 @@ class AdaptPMCDDA:
                 feature_list = np.append(feature_list, np.array(mid_feature.data.cpu()), axis=0)
 
                 is_last = (step + 1 == len_data)
-                progress_report(phase, step, start_time, self.args.batch_size, len_data, is_last)
+                progress_report(phase, step, start_time, 1, len_data, is_last)
 
         self.plotter.record(epoch, f'{split_type}_{data_category}_classifier_loss', loss_cls / len_data)
         self.plotter.record(epoch, f'{split_type}_{data_category}_instance_loss', loss_ins / len_data)
@@ -339,7 +326,7 @@ class AdaptPMCDDA:
                     idx_list = np.append(idx_list, np.array(index), axis=0)
 
                 is_last = (step + 1 == len_data)
-                progress_report("pseudo labeling", step, start_time, self.args.batch_size, len_data, is_last)
+                progress_report("pseudo labeling", step, start_time, 1, len_data, is_last)
 
         labeling_num = self.give_pseudo_label(
             epoch, pred1_list, pred2_list, gt_list, idx_list, cls_score, ins_score)

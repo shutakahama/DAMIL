@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def progress_report(phase, count, start_time, batchsize, whole_sample, is_last):
+def progress_report(phase, count, start_time, batchsize, whole_sample, is_last=False):
     duration = time.time() - start_time
     interval = str(datetime.timedelta(seconds=int(duration)))
     throughput = count * batchsize / duration

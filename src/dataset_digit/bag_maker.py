@@ -1,8 +1,11 @@
 import numpy as np
+import logging
 import torch
 import torch.utils.data as data_utils
 from torchvision.datasets import MNIST, SVHN
-from utils import logger
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class BagMaker(data_utils.Dataset):
