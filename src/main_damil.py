@@ -89,10 +89,10 @@ def main():
         restore=os.path.join(args.restore_path, 'classifier.model'))
     classifier1 = init_model(
         net=Classifier(args.feat_dim, args.num_class), device=args.device,
-        restore=None)
+        restore=os.path.join(args.restore_path, 'classifier.model'))
     classifier2 = init_model(
         net=Classifier(args.feat_dim, args.num_class), device=args.device,
-        restore=None)
+        restore=os.path.join(args.restore_path, 'classifier.model'))
     attention = init_model(
         net=Attention(args.feat_dim, args.num_class), device=args.device,
         restore=os.path.join(args.restore_path, 'attention.model'))
