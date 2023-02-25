@@ -4,7 +4,7 @@ import argparse
 import logging
 
 from dataset_digit import DigitDataFactory
-from core import AdaptPMCDDA, PretrainParallel
+from core import AdaptDAMIL, PretrainDAMIL
 from models import EncoderDigit, Classifier, Attention
 from utils import init_model, create_output_dir
 
@@ -100,7 +100,7 @@ def main():
     use_pretrained = (encoder.restored and classifier_pre.restored and attention.restored)
     if not use_pretrained:
         logger.info("=== Pre-training classifier ===")
-        pretrain = PretrainParallel(
+        pretrain = PretrainDAMIL(
             out_dir, encoder, classifier_pre, attention, data_loaders, args)
         pretrain.train()
         pretrain.plotter.refresh()
@@ -116,7 +116,7 @@ def main():
         classifier2 = pretrain.classifier
 
     logger.info("=== Adaptation Training ===")
-    adapt = AdaptPMCDDA(
+    adapt = AdaptDAMIL(
         out_dir, encoder, classifier1, classifier2, attention, data_loaders, args)
 
     adapt.train()

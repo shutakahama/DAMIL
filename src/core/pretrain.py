@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class PretrainParallel:
+class PretrainDAMIL:
     def __init__(self, out_dir, encoder, classifier, attention, data_loaders, args):
 
         self.plotter = Plotter(os.path.join(out_dir, "pretrain"))

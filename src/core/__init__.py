@@ -1,7 +1,7 @@
-from .adapt_pmcdda import AdaptPMCDDA
-from .pretrain_parallel import PretrainParallel
+from .adapt import AdaptDAMIL
+from .pretrain import PretrainDAMIL
 
 __all__ = [
-    'AdaptPMCDDA',
-    'PretrainParallel',
+    'AdaptDAMIL',
+    'PretrainDAMIL',
 ]

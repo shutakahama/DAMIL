@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class AdaptPMCDDA:
+class AdaptDAMIL:
     def __init__(self, out_dir, encoder, classifier1, classifier2, attention, data_loaders, args):
         self.out_dir = out_dir
         self.plotter = Plotter(os.path.join(out_dir, "adapt"))
