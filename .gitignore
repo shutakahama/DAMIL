@@ -4,3 +4,4 @@ experiment.sh
 MNIST
 SVHN
 result_logs
+*DS_Store
