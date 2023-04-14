@@ -22,8 +22,5 @@ class EncoderDigit(nn.Module):
         x = F.max_pool2d(F.relu(self.bn2(self.conv2(x))), stride=2, kernel_size=3, padding=1)
         x = F.relu(self.bn3(self.conv3(x)))
         x = x.reshape(x.size(0), -1)
-        if x.size(0) > 1:
-            x = self.dp1(F.relu(self.bnf1(self.fc1(x))))
-        else:
-            x = self.dp1(F.relu(self.fc1(x)))
+        x = self.dp1(F.relu(self.bnf1(self.fc1(x))))
         return x

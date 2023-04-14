@@ -12,9 +12,6 @@ class Classifier(nn.Module):
         self.restored = False
 
     def forward(self, x):
-        if x.size(0) > 1:
-            x = F.relu(self.bn1(self.fc1(x)))
-        else:
-            x = F.relu(self.fc1(x))
+        x = F.relu(self.bn1(self.fc1(x)))
         x = self.fc2(x)
         return x
