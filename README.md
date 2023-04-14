@@ -33,20 +33,20 @@ In our paper, we proved the effectiveness of our method with real-world patholog
 <br>
 
 ## Getting Started
-Python ~= 3.9 is required.
+Python >= 3.9 is required.
 
 If you have poetry environment,
 ```
 poetry install
 cd src/
-poetry run python -m main_damil [LOG_OUTPUT_DIR]
+poetry run python -m main_damil LOG_OUTPUT_DIR
 ```
 
 Otherwise
 ```
 pip install -r requirements.txt
 cd src/
-poetry run python -m main_damil [LOG_OUTPUT_DIR]
+poetry run python -m main_damil LOG_OUTPUT_DIR
 ```
 
 ## Note
