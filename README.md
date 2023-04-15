@@ -1,5 +1,5 @@
 # Domain Adaptive Multiple Instance Learning for Instance-level Prediction
-Implementation of DAMIL (Domain Adaptive Multiple Instance Learning)  
+Official implementation of DAMIL (Domain Adaptive Multiple Instance Learning)  
 Accepted by [ISBI 2023](https://2023.biomedicalimaging.org/) (Oral)  
 [[Paper Link (Arxiv)]](https://arxiv.org/abs/2304.03537)  
 
