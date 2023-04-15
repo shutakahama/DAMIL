@@ -48,7 +48,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    out_dir = create_output_dir(args)
+    out_dir = create_output_dir(args.log_dir, args.out, args)
 
     torch.manual_seed(args.random_seed)
 

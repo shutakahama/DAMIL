@@ -1,5 +1,4 @@
 import os
-import inspect
 import time
 import numpy as np
 import logging
@@ -15,6 +14,24 @@ logger = logging.getLogger(__name__)
 
 
 class AdaptDAMIL:
+    """Model Traning Step 2 and 3.
+    - Step 2 uses update().
+    Train models with source data and pseudo-labeled target data.
+    In addition, the feature matching loss of MCD-DA is included.
+    - Step 3: uses labeling().
+    Give pseudo-labels to the target data with high confidence scores.
+
+        Args:
+            out_dir (str): logging output directory name.
+            encoder : Encoder model class.
+            classifier1 : Instance classifier model class.
+            classifier2 : Instance classifier model class.
+            attention : Bag classifier model class
+            data_loaders (dict): Dictionary of data loader class.
+                This must include "source_train", "target_train",
+                "source_valid", and "taret_valid".
+            args : Other parameters.
+        """
     def __init__(self, out_dir, encoder, classifier1, classifier2, attention, data_loaders, args):
         self.out_dir = out_dir
         self.plotter = Plotter(os.path.join(out_dir, "adapt"))
@@ -26,12 +43,8 @@ class AdaptDAMIL:
         self.pseudo_label_dict = dict()
         self.args = args
 
-        if "get_params" in [obj[0] for obj in inspect.getmembers(self.encoder, inspect.ismethod)]:
-            self.optimizer_e = optim.Adam(
-                self.encoder.get_params(), lr=args.lr_adapt, weight_decay=args.weight_decay)
-        else:
-            self.optimizer_e = optim.Adam(
-                self.encoder.parameters(), lr=args.lr_adapt, weight_decay=args.weight_decay)
+        self.optimizer_e = optim.Adam(
+            self.encoder.parameters(), lr=args.lr_adapt, weight_decay=args.weight_decay)
         self.optimizer_c1 = optim.Adam(
             self.classifier1.parameters(), lr=args.lr_adapt, weight_decay=args.weight_decay)
         self.optimizer_c2 = optim.Adam(
@@ -55,7 +68,14 @@ class AdaptDAMIL:
         return torch.mean(
             torch.abs(torch.softmax(out1, dim=1) - torch.softmax(out2, dim=1)))
 
-    def update(self, epoch, labeled_num, criterion):
+    def update(self, epoch, labeled_num):
+        """Train models with 4 steps.
+
+        Args:
+            epoch (int): Parameter to indicate the current epoch.
+            labeled_num (int): The number of labeled target instances
+                in the previous epoch.
+        """
         train_loss_c = train_loss_a = train_loss_d1 = train_loss_d2 = 0
         pred_cls_list = np.empty((0, 2), np.float32)
         gt_cls_list = np.empty(0, np.float32)
@@ -63,8 +83,11 @@ class AdaptDAMIL:
         labeled_sample_sum = [0]*int(self.args.bag_size_mean * 2)
         max_sample_num = labeled_num // len(self.data_loaders["target_train"]) + 1
 
+        criterion = nn.CrossEntropyLoss().to(self.args.device)
+
         data_zip = enumerate(zip(
             self.data_loaders["source_train"], self.data_loaders["target_train"]))
+
         for step, (source_batch, target_batch) in data_zip:
             source_data, source_label, _ = source_batch
             target_data, target_label, target_idx = target_batch
@@ -78,6 +101,10 @@ class AdaptDAMIL:
             source_data = source_data.squeeze(0)
             target_data = target_data.squeeze(0)
 
+            # Create mix data by combining source data and pseudo-labeled target data.
+            # If target_bag_label = 0, all data have negative labels so we sample
+            # {sample_num} data randomly.
+            # If target_bag_label = 1, select labeled data with the pseudo_label_dict.
             if target_bag_label == 0:
                 sample_num = min(len(target_data), max_sample_num)
                 perm = np.random.permutation(len(target_data))[:sample_num]
@@ -116,8 +143,8 @@ class AdaptDAMIL:
             target_bag_label = target_bag_label.to(self.args.device)
             target_instance_label = target_instance_label.to(self.args.device)
 
-            # for mix
-            # 1. Optimize Classifier model with source data
+            # Training steps
+            # Step 1. Optimize classifier models with mix data
             self.reset_grad()
             feat_mix = self.encoder(mix_data)
             output_m1 = self.classifier1(feat_mix)
@@ -132,7 +159,7 @@ class AdaptDAMIL:
             self.optimizer_e.step()
             train_loss_c += loss_c.data
 
-            # 2. maximize discrepancy (MCDDA) for mix data
+            # Step 2. Maximize discrepancy (MCDDA) for mix data
             self.reset_grad()
             feat_mix = self.encoder(mix_data)
             output_m1 = self.classifier1(feat_mix)
@@ -151,7 +178,7 @@ class AdaptDAMIL:
             self.optimizer_c2.step()
             train_loss_d1 += loss.data
 
-            # 3. minimize discrepancy (MCDDA)
+            # Step 3. Minimize discrepancy with MCD-DA loss
             for i in range(3):
                 self.reset_grad()
                 feat_tgt = self.encoder(target_data)
@@ -163,7 +190,7 @@ class AdaptDAMIL:
                 self.optimizer_e.step()
                 train_loss_d2 += loss_dis.data
 
-            # 4. Optimize Attention model (target data supervised learning)
+            # Step 4. Optimize Attention model with source and target data
             self.reset_grad()
             feat_src = self.encoder(source_data)
             pred_src, _ = self.attention(feat_src)
@@ -178,7 +205,7 @@ class AdaptDAMIL:
             self.optimizer_e.step()
             train_loss_a += loss_a.data
 
-            # calculate accuracy
+            # Calculate accuracy
             feat_tgt = self.encoder(target_data)
             output_t1 = self.classifier1(feat_tgt)
             output_t2 = self.classifier2(feat_tgt)
@@ -189,6 +216,7 @@ class AdaptDAMIL:
             is_last = (step + 1 == self.len_data_loader)
             progress_report("train", step, start_time, 1, self.len_data_loader, is_last)
 
+        # Record metrics
         self.plotter.record(epoch, 'train_classifier_loss', train_loss_c / self.len_data_loader)
         self.plotter.record(epoch, 'train_attention_loss', train_loss_a / self.len_data_loader)
         self.plotter.record(epoch, 'train_max_dis_loss', train_loss_d1 / self.len_data_loader)
@@ -197,32 +225,46 @@ class AdaptDAMIL:
         # logger.info(f"Distribution of the number of labeled samples: {labeled_sample_sum}")
 
     def train(self):
+        """Core function to train models
+        """
         self.encoder.train()
         self.classifier1.train()
         self.classifier2.train()
         self.attention.train()
 
-        criterion = nn.CrossEntropyLoss().to(self.args.device)
         labeled_num = 0
 
         for epoch in range(self.args.num_epochs_adapt):
             logger.info(f"epoch: {epoch}")
-            self.update(epoch, labeled_num, criterion)
+            self.update(epoch, labeled_num)
             cls_score, ins_score = self.predict(
                 epoch, self.data_loaders["source_valid"], split_type='valid', data_category='source')
-            self.predict(epoch, self.data_loaders["target_valid"], split_type='valid', data_category='target')
+            self.predict(
+                epoch, self.data_loaders["target_valid"], split_type='valid', data_category='target')
             labeled_num = self.labeling(epoch, cls_score, ins_score)
 
             self.plotter.flush(epoch)
 
-    def predict(self, epoch, data_loader, split_type='test', data_category=None):
+    def predict(self, epoch, data_loader, split_type, data_category):
+        """Calculate prediction scores of trained models
+
+        Args:
+            epoch (int): Parameter to indicate the current epoch
+            data_loader : Data loader class for prediction
+            split_type (str): 'valid' or 'test'
+            data_category (str): 'source' or 'target'
+
+        Returns:
+            cls_score : PR-AUC score of predictions by the instance classifier
+            ins_score : PR-AUC score of predictions by the bag classifier
+        """
         self.encoder.eval()
         self.classifier1.eval()
         self.classifier2.eval()
         self.attention.eval()
         criterion = nn.CrossEntropyLoss().to(self.args.device)
 
-        # init loss and accuracy
+        # Initialize loss and accuracy scores
         len_data = len(data_loader.dataset)
         loss_cls = loss_bag = loss_ins = 0
         pred_cls_list = np.empty((0, self.args.num_class), np.float32)
@@ -267,12 +309,15 @@ class AdaptDAMIL:
                 is_last = (step + 1 == len_data)
                 progress_report(phase, step, start_time, 1, len_data, is_last)
 
+        # Record metrics
         self.plotter.record(epoch, f'{split_type}_{data_category}_classifier_loss', loss_cls / len_data)
         self.plotter.record(epoch, f'{split_type}_{data_category}_instance_loss', loss_ins / len_data)
         self.plotter.record(epoch, f'{split_type}_{data_category}_bag_loss', loss_bag / len_data)
         evaluate(self.plotter, epoch, f'{split_type}_{data_category}_bag', pred_bag_list, gt_bag_list)
-        cls_score = evaluate(self.plotter, epoch, f'{split_type}_{data_category}_classifier', pred_cls_list, gt_cls_list)
-        ins_score = evaluate(self.plotter, epoch, f'{split_type}_{data_category}_instance', pred_ins_list, gt_cls_list)
+        cls_score = evaluate(
+            self.plotter, epoch, f'{split_type}_{data_category}_classifier', pred_cls_list, gt_cls_list)
+        ins_score = evaluate(
+            self.plotter, epoch, f'{split_type}_{data_category}_instance', pred_ins_list, gt_cls_list)
 
         if data_category == "target" and split_type == 'valid':
             self.plotter.save_files({
@@ -289,6 +334,16 @@ class AdaptDAMIL:
         return cls_score, ins_score
 
     def labeling(self, epoch, cls_score, ins_score):
+        """Give pseudo-labels to target instances in the train set.
+
+        Args:
+            epoch (int): Parameter to indicate the current epoch
+            cls_score (float): PR-AUC score of the instance classifier prediction
+            ins_score (float): PR-AUC score of by the bag classifier prediction
+
+        Returns:
+            labeling_num (int): The number of labeled target instances
+        """
         self.encoder.eval()
         self.classifier1.eval()
         self.classifier2.eval()
@@ -334,6 +389,20 @@ class AdaptDAMIL:
         return labeling_num
 
     def give_pseudo_label(self, epoch, pred1, pred2, gt_list, idx_list, cls_score, ins_score):
+        """Core function to choose instances to give pseudo-labels
+
+        Args:
+            epoch (int): Parameter to indicate the current epoch
+            pred1 : Numpy array of prediction scores by the instance classifier
+            pred2 : Numpy array of prediction scores by the bag classifier
+            gt_list : Numpy array of true labels (Only for experimental evaluation)
+            idx_list : Numpy array of data indexes
+            cls_score (float): PR-AUC score of the instance classifier prediction
+            ins_score (float): PR-AUC score of by the bag classifier prediction
+
+        Returns:
+            labeling_num (int): The number of labeled target instances
+        """
         # Calculate candidate index with weighted confidence score
         weighted_val = pred1 * cls_score + pred2 * ins_score
         max_idx = np.argmax(weighted_val, axis=1)
